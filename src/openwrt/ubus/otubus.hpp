@@ -36,6 +36,7 @@
 
 #include "openthread-br/config.h"
 
+#include <set>
 #include <stdarg.h>
 #include <time.h>
 
@@ -48,13 +49,7 @@
 #include "common/mainloop.hpp"
 #include "host/rcp_host.hpp"
 
-extern "C" {
-#include <libubox/blobmsg_json.h>
-#include <libubox/uloop.h>
-#include <libubox/ustream.h>
-#include <libubox/utils.h>
 #include <libubus.h>
-}
 
 namespace otbr {
 namespace Host {
@@ -77,9 +72,8 @@ public:
      * Constructor
      *
      * @param[in] aHost  A pointer to OpenThread Controller structure.
-     * @param[in] aMutex       A pointer to mutex.
      */
-    static void Initialize(Host::RcpHost *aHost, std::mutex *aMutex);
+    static void Initialize(Host::RcpHost *aHost);
 
     /**
      * This method return the instance of the global UbusServer.
@@ -745,14 +739,15 @@ public:
     void HandleDiagnosticGetResponse(otError aError, otMessage *aMessage, const otMessageInfo *aMessageInfo);
 
 private:
-    bool                 mIfFinishScan;
-    struct ubus_context *mContext;
-    const char          *mSockPath;
-    struct blob_buf      mBuf;
-    struct blob_buf      mNetworkdataBuf;
-    Host::RcpHost       *mHost;
-    std::mutex          *mHostMutex;
-    time_t               mSecond;
+    struct ubus_context     *mContext;
+    const char              *mSockPath;
+    struct blob_buf          mBuf;
+    struct blob_buf          mNetworkdataBuf;
+    struct ubus_request_data mScanRequest;
+    struct blob_buf          mScanBuf{};
+    void                    *mScanArray;
+    Host::RcpHost           *mHost;
+    time_t                   mSecond;
     enum
     {
         kDefaultJoinerTimeout = 120,
@@ -762,14 +757,8 @@ private:
      * Constructor
      *
      * @param[in] aHost    The pointer to OpenThread Controller structure.
-     * @param[in] aMutex   A pointer to mutex.
      */
-    UbusServer(Host::RcpHost *aHost, std::mutex *aMutex);
-
-    /**
-     * This method start scan.
-     */
-    void ProcessScan(void);
+    UbusServer(Host::RcpHost *aHost);
 
     /**
      * This method detailly start scan.
@@ -1075,7 +1064,35 @@ private:
     void AppendResult(otError aError, struct ubus_context *aContext, struct ubus_request_data *aRequest);
 };
 
-class UBusAgent : public MainloopProcessor
+class UloopProcessor : public MainloopProcessor
+{
+public:
+    UloopProcessor() = default;
+    ~UloopProcessor() override;
+
+    /**
+     * Initializes uloop.
+     *
+     * Only a single instance of UloopProcessor can be in an initialized state at any one time.
+     *
+     * Note: uloop will install signal handlers for SIGINT and SIGTERM if none have been installed yet.
+     * These handlers only work correctly when using the uloop main loop via uloop_run(). This means
+     * our otbr::Application handlers MUST be installed before calling this method.
+     */
+    void Init();
+
+    void Update(MainloopContext &aMainloop) override;
+    void Process(const MainloopContext &aMainloop) override;
+
+private:
+    static void ULoopFDHandler(uloop_fd *aFd, unsigned int aFlags);
+
+    std::set<uloop_fd *> mFds;
+
+    static UloopProcessor *sInstance;
+};
+
+class UBusAgent : public UloopProcessor
 {
 public:
     /**
@@ -1085,7 +1102,6 @@ public:
      */
     UBusAgent(otbr::Host::RcpHost &aHost)
         : mHost(aHost)
-        , mThreadMutex()
     {
     }
 
@@ -1094,14 +1110,8 @@ public:
      */
     void Init(void);
 
-    void Update(MainloopContext &aMainloop) override;
-    void Process(const MainloopContext &aMainloop) override;
-
 private:
-    static void UbusServerRun(void) { otbr::ubus::UbusServer::GetInstance().InstallUbusObject(); }
-
     otbr::Host::RcpHost &mHost;
-    std::mutex           mThreadMutex;
 };
 } // namespace ubus
 } // namespace otbr

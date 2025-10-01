@@ -35,6 +35,4 @@ target_link_libraries(otbr-ubus PRIVATE
     openthread-posix
     ubox
     ubus
-    blobmsg_json
-    json-c
 )

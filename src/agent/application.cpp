@@ -106,6 +106,11 @@ void Application::Init(const std::string &aRestListenAddress, int aRestListenPor
 {
     CoprocessorType type;
 
+    // Set up signal handlers before initializing other components.
+    signal(SIGTERM, HandleSignal); // allow quitting elegantly
+    signal(SIGINT, HandleSignal);  // ... also on SIGINT
+    signal(SIGPIPE, SIG_IGN);      // avoid exiting on SIGPIPE
+
     mHost.Init();
 
     type = mHost.GetCoprocessorType();
@@ -178,12 +183,6 @@ otbrError Application::Run(void)
         }
     }
 #endif
-
-    // allow quitting elegantly
-    signal(SIGTERM, HandleSignal);
-
-    // avoid exiting on SIGPIPE
-    signal(SIGPIPE, SIG_IGN);
 
     // Generic readiness notification for fd-based supervisors (s6, dinit,
     // ...): write a newline to the file descriptor passed in OTBR_NOTIFY_FD.
