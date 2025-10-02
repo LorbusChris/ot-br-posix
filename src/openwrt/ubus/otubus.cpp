@@ -53,9 +53,8 @@ const static int PANID_LENGTH      = 10;
 const static int XPANID_LENGTH     = 64;
 const static int NETWORKKEY_LENGTH = 64;
 
-UbusServer::UbusServer(Host::RcpHost *aHost)
-    : mContext(nullptr)
-    , mSockPath(nullptr)
+UbusServer::UbusServer(ubus_context &aContext, Host::RcpHost *aHost)
+    : mContext(aContext)
     , mHost(aHost)
     , mSecond(0)
 {
@@ -71,9 +70,9 @@ UbusServer &UbusServer::GetInstance(void)
     return *sUbusServerInstance;
 }
 
-void UbusServer::Initialize(Host::RcpHost *aHost)
+void UbusServer::Initialize(ubus_context &aContext, Host::RcpHost *aHost)
 {
-    sUbusServerInstance = new UbusServer(aHost);
+    sUbusServerInstance = new UbusServer(aContext, aHost);
 }
 
 enum
@@ -248,8 +247,8 @@ void UbusServer::HandleActiveScanResultDetail(otActiveScanResult *aResult)
     {
         blobmsg_close_array(&mScanBuf, mScanArray);
         blobmsg_add_u16(&mScanBuf, "Error", OT_ERROR_NONE);
-        ubus_send_reply(mContext, &mScanRequest, mScanBuf.head);
-        ubus_complete_deferred_request(mContext, &mScanRequest, 0);
+        ubus_send_reply(&mContext, &mScanRequest, mScanBuf.head);
+        ubus_complete_deferred_request(&mContext, &mScanRequest, 0);
         goto exit;
     }
 
@@ -302,7 +301,7 @@ int UbusServer::UbusScanHandlerDetail(struct ubus_context      *aContext,
     SuccessOrExit(error = otLinkActiveScan(mHost->GetInstance(), scanChannels, scanDuration,
                                            &UbusServer::HandleActiveScanResult, this));
 
-    ubus_defer_request(mContext, aRequest, &mScanRequest);
+    ubus_defer_request(&mContext, aRequest, &mScanRequest);
     blob_buf_init(&mScanBuf, 0);
     mScanArray = blobmsg_open_array(&mScanBuf, "scan_list");
 
@@ -1597,93 +1596,11 @@ void UbusServer::GetState(otInstance *aInstance, char *aState)
     }
 }
 
-void UbusServer::UbusAddFd()
-{
-    // ubus library function
-    ubus_add_uloop(mContext);
-
-#ifdef FD_CLOEXEC
-    fcntl(mContext->sock.fd, F_SETFD, fcntl(mContext->sock.fd, F_GETFD) | FD_CLOEXEC);
-#endif
-}
-
-void UbusServer::UbusReconnTimer(struct uloop_timeout *aTimeout)
-{
-    GetInstance().UbusReconnTimerDetail(aTimeout);
-}
-
-void UbusServer::UbusReconnTimerDetail(struct uloop_timeout *aTimeout)
-{
-    OT_UNUSED_VARIABLE(aTimeout);
-
-    static struct uloop_timeout retry = {
-        list : {},
-        pending : false,
-        cb : UbusReconnTimer,
-        time : {},
-    };
-    int time = 2;
-
-    if (ubus_reconnect(mContext, mSockPath) != 0)
-    {
-        uloop_timeout_set(&retry, time * 1000);
-        return;
-    }
-
-    UbusAddFd();
-}
-
-void UbusServer::UbusConnectionLost(struct ubus_context *aContext)
-{
-    OT_UNUSED_VARIABLE(aContext);
-
-    UbusReconnTimer(nullptr);
-}
-
-int UbusServer::DisplayUbusInit(const char *aPath)
-{
-    mSockPath = aPath;
-
-    mContext = ubus_connect(aPath);
-    if (!mContext)
-    {
-        otbrLogErr("Ubus connect failed");
-        return -1;
-    }
-
-    otbrLogInfo("Connected as %08x\n", mContext->local_id);
-    mContext->connection_lost = UbusConnectionLost;
-
-    /* file description */
-    UbusAddFd();
-
-    /* Add a object */
-    if (ubus_add_object(mContext, &otbr) != 0)
-    {
-        otbrLogErr("Ubus add obj failed");
-        return -1;
-    }
-
-    return 0;
-}
-
-void UbusServer::DisplayUbusDone(void)
-{
-    if (mContext)
-    {
-        ubus_free(mContext);
-        mContext = nullptr;
-    }
-}
-
 void UbusServer::InstallUbusObject(void)
 {
-    char *path = nullptr;
-
-    if (-1 == DisplayUbusInit(path))
+    if (ubus_add_object(&mContext, &otbr) != 0)
     {
-        otbrLogErr("Ubus connect failed");
-        return;
+        otbrLogErr("Failed to publish object");
     }
 }
 
@@ -1819,11 +1736,57 @@ void UloopProcessor::Process(const MainloopContext &aMainloop)
 
 // === UBusAgent ===
 
-void UBusAgent::Init(void)
+UBusAgent::UBusAgent(otbr::Host::RcpHost &aHost)
+    : ubus_context{}
+    , uloop_timeout{}
+    , mHost(aHost)
+{
+}
+
+UBusAgent::~UBusAgent()
+{
+    uloop_timeout_cancel(&ReconnectTimer());
+    ubus_shutdown(&Context());
+}
+
+void UBusAgent::Init()
 {
     UloopProcessor::Init();
-    UbusServer::Initialize(&mHost);
+
+    // Hard-fail on initial connection error; later disconnection is handled gracefully.
+    VerifyOrDie(ubus_connect_ctx(&Context(), nullptr) == 0, "Unable to connect to ubus");
+    UbusConnected();
+
+    UbusServer::Initialize(Context(), &mHost);
     UbusServer::GetInstance().InstallUbusObject();
+}
+
+void UBusAgent::UbusConnected()
+{
+    otbrLogInfo("Connected to ubus (peer id %08x)", Context().local_id);
+    Context().connection_lost = [](ubus_context *aCtx) { static_cast<UBusAgent *>(aCtx)->OnConnectionLost(); };
+    ubus_add_uloop(&Context());
+}
+
+void UBusAgent::OnConnectionLost()
+{
+    otbrLogInfo("Connection to ubus lost");
+    // Make the first attempt immediately
+    OnReconnectTimer();
+}
+
+void UBusAgent::OnReconnectTimer()
+{
+    otbrLogDebug("Reconnecting...");
+    if (ubus_reconnect(&Context(), nullptr) == 0)
+    {
+        UbusConnected(); // our objects have been republished by ubus_reconnect()
+    }
+    else
+    {
+        ReconnectTimer().cb = [](uloop_timeout *aTimeout) { static_cast<UBusAgent *>(aTimeout)->OnReconnectTimer(); };
+        uloop_timeout_set(&ReconnectTimer(), 2000 /* ms */);
+    }
 }
 
 } // namespace ubus

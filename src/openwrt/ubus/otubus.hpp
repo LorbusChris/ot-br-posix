@@ -65,6 +65,14 @@ namespace ubus {
  *   This namespace contains definitions for ubus related instance.
  */
 
+// Implementation note: Some of these classes use a pattern of inheriting
+// privately from ubus_* structs that would commonly be members instead.
+// This pattern allows static callback stubs that receive a pointer to the
+// ubus structure to recover the owning object via a simple down cast from
+// the base class pointer. In C, these functions would instead use
+// container_of(), but its use is not generally safe in C++, especially when
+// the container type is not standard-layout.
+
 class UbusServer
 {
 public:
@@ -73,7 +81,7 @@ public:
      *
      * @param[in] aHost  A pointer to OpenThread Controller structure.
      */
-    static void Initialize(Host::RcpHost *aHost);
+    static void Initialize(ubus_context &aContext, Host::RcpHost *aHost);
 
     /**
      * This method return the instance of the global UbusServer.
@@ -739,8 +747,7 @@ public:
     void HandleDiagnosticGetResponse(otError aError, otMessage *aMessage, const otMessageInfo *aMessageInfo);
 
 private:
-    struct ubus_context     *mContext;
-    const char              *mSockPath;
+    ubus_context            &mContext;
     struct blob_buf          mBuf;
     struct blob_buf          mNetworkdataBuf;
     struct ubus_request_data mScanRequest;
@@ -748,6 +755,7 @@ private:
     void                    *mScanArray;
     Host::RcpHost           *mHost;
     time_t                   mSecond;
+
     enum
     {
         kDefaultJoinerTimeout = 120,
@@ -758,7 +766,7 @@ private:
      *
      * @param[in] aHost    The pointer to OpenThread Controller structure.
      */
-    UbusServer(Host::RcpHost *aHost);
+    UbusServer(ubus_context &aContext, Host::RcpHost *aHost);
 
     /**
      * This method detailly start scan.
@@ -984,46 +992,6 @@ private:
     void GetState(otInstance *aInstance, char *aState);
 
     /**
-     * This method add fd of ubus object.
-     */
-    void UbusAddFd(void);
-
-    /**
-     * This method set ubus reconnect time.
-     *
-     * @param[in] aTimeout  A pointer to the timeout.
-     */
-    static void UbusReconnTimer(struct uloop_timeout *aTimeout);
-
-    /**
-     * This method detailly handle ubus reconnect time.
-     *
-     * @param[in] aTimeout  A pointer to the timeout.
-     */
-    void UbusReconnTimerDetail(struct uloop_timeout *aTimeout);
-
-    /**
-     * This method handle ubus connection lost.
-     *
-     * @param[in] aContext  A pointer to the context.
-     */
-    static void UbusConnectionLost(struct ubus_context *aContext);
-
-    /**
-     * This method connect and display ubus.
-     *
-     * @param[in] aPath  A pointer to the ubus server path(default is nullptr).
-     *
-     * @retval 0  Successfully handler the request.
-     */
-    int DisplayUbusInit(const char *aPath);
-
-    /**
-     * This method disconnect and display ubus.
-     */
-    void DisplayUbusDone(void);
-
-    /**
      * This method parses an ASCII string as a long.
      *
      * @param[in]  aString  A pointer to the ASCII string.
@@ -1064,6 +1032,9 @@ private:
     void AppendResult(otError aError, struct ubus_context *aContext, struct ubus_request_data *aRequest);
 };
 
+/**
+ * Integrates uloop with the OTBR main loop.
+ */
 class UloopProcessor : public MainloopProcessor
 {
 public:
@@ -1092,7 +1063,7 @@ private:
     static UloopProcessor *sInstance;
 };
 
-class UBusAgent : public UloopProcessor
+class UBusAgent : public UloopProcessor, private ubus_context, private uloop_timeout
 {
 public:
     /**
@@ -1100,17 +1071,23 @@ public:
      *
      * @param[in] aHost  A reference to the Thread controller.
      */
-    UBusAgent(otbr::Host::RcpHost &aHost)
-        : mHost(aHost)
-    {
-    }
+    UBusAgent(otbr::Host::RcpHost &aHost);
+    ~UBusAgent() override;
 
     /**
-     * This method initializes the UBus agent.
+     * Connects to ubus and publishes OTBR objects.
      */
     void Init(void);
 
 private:
+    ubus_context  &Context() { return *this; }
+    uloop_timeout &ReconnectTimer() { return *this; }
+
+    void OnConnectionLost();
+    void OnReconnectTimer();
+
+    void UbusConnected();
+
     otbr::Host::RcpHost &mHost;
 };
 } // namespace ubus
