@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2019, The OpenThread Authors.
+ *  Copyright (c) 2019-2026, The OpenThread Authors.
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -37,19 +37,13 @@
 #include "openthread-br/config.h"
 
 #include <set>
-#include <stdarg.h>
-#include <time.h>
 
-#include <openthread/ip6.h>
-#include <openthread/link.h>
-#include <openthread/netdiag.h>
-#include <openthread/udp.h>
+#include <libubus.h>
+#include <openthread/commissioner.h>
+#include <openthread/thread.h>
 
 #include "common/code_utils.hpp"
 #include "common/mainloop.hpp"
-#include "host/rcp_host.hpp"
-
-#include <libubus.h>
 
 namespace otbr {
 namespace Host {
@@ -151,33 +145,8 @@ private:
     static UbusServer &PrepareInvocation(ubus_object *aObj, ubus_request_data *aRequest, const char *aMethod);
     friend struct UbusMethodHandler; // calls PrepareInvocation
 
-    /**
-     * This method convert thread network state to string.
-     *
-     * @param[in]  aInstance  A pointer to the instance.
-     * @param[out] aState     A pointer to the string address.
-     */
-    void GetState(otInstance *aInstance, char *aState);
-
-    /**
-     * This method parses an ASCII string as a long.
-     *
-     * @param[in]  aString  A pointer to the ASCII string.
-     * @param[out] aLong    A reference to where the parsed long is placed.
-     *
-     * @retval OT_ERROR_NONE   Successfully parsed the ASCII string.
-     * @retval OT_ERROR_PARSE  Could not parse the ASCII string.
-     */
-    otError ParseLong(char *aString, long &aLong);
-
-    /**
-     * This method append result in message passed to ubus.
-     *
-     * @param[in] aError    The error type of the message.
-     * @param[in] aContext  A pointer to the context.
-     * @param[in] aRequest  A pointer to the request.
-     */
-    void AppendResult(otError aError, struct ubus_context *aContext, struct ubus_request_data *aRequest);
+    // Adds the provided error code to the response and sends it.
+    void SendInvokeResponse(ubus_request_data *aRequest, blob_buf *aBuf, otError aError);
 
     static const ubus_method sMethods[];
     static ubus_object_type  sObjectType;
@@ -185,7 +154,7 @@ private:
     ubus_object &Object() { return *this; }
 
     ubus_context  &mContext;
-    Host::RcpHost *mHost;
+    Host::RcpHost &mHost;
 
     blob_buf mBuf{}; // default buffer for sync responses
 
