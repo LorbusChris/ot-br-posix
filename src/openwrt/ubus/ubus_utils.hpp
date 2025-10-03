@@ -111,6 +111,10 @@ struct UbusMethodHandler
 #define OTBR_UBUS_METHOD(NAME, METHOD, POLICY) \
     UBUS_METHOD(NAME, (UbusMethodHandler::Adapter<decltype(METHOD), METHOD, decltype(POLICY), POLICY>()), POLICY)
 
+// Like blobmsg_add_string(), but hex-encodes the specified data first.
+// Returns 0 on success, or -1 on error
+int blobmsg_add_hex_string(blob_buf *aBuf, const char *aName, const uint8_t *aData, unsigned int aLength);
+
 } // namespace ubus
 } // namespace otbr
 

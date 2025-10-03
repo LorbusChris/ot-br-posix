@@ -28,6 +28,7 @@
 
 add_library(otbr-ubus
     otubus.cpp
+    ubus_utils.cpp
 )
 target_link_libraries(otbr-ubus PRIVATE
     otbr-config

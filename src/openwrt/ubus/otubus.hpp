@@ -182,15 +182,6 @@ private:
     int Hex2Bin(const char *aHex, uint8_t *aBin, uint16_t aBinLength);
 
     /**
-     * This method output bytes into char*.
-     *
-     * @param[in]  aBytes   A pointer to the bytes need to be convert.
-     * @param[in]  aLength  The length of the bytes.
-     * @param[out] aOutput  A pointer to the char* string.
-     */
-    void OutputBytes(const uint8_t *aBytes, uint8_t aLength, char *aOutput);
-
-    /**
      * This method append result in message passed to ubus.
      *
      * @param[in] aError    The error type of the message.

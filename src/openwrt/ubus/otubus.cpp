@@ -50,9 +50,6 @@ namespace ubus {
 
 static constexpr uint32_t kDefaultJoinerTimeout = 120;
 
-const static int XPANID_LENGTH     = 64;
-const static int NETWORKKEY_LENGTH = 64;
-
 // === UbusServer ===
 
 UbusServer::UbusServer(ubus_context &aContext, Host::RcpHost &aHost)
@@ -96,16 +93,6 @@ void UbusServer::HandleActiveScanResult(otActiveScanResult *aResult, void *aCont
     static_cast<UbusServer *>(aContext)->HandleActiveScanResultDetail(aResult);
 }
 
-void UbusServer::OutputBytes(const uint8_t *aBytes, uint8_t aLength, char *aOutput)
-{
-    char byte2char[5] = "";
-    for (int i = 0; i < aLength; i++)
-    {
-        sprintf(byte2char, "%02x", aBytes[i]);
-        strcat(aOutput, byte2char);
-    }
-}
-
 void UbusServer::AppendResult(otError aError, struct ubus_context *aContext, struct ubus_request_data *aRequest)
 {
     blobmsg_add_u16(&mBuf, "Error", aError);
@@ -115,8 +102,6 @@ void UbusServer::AppendResult(otError aError, struct ubus_context *aContext, str
 void UbusServer::HandleActiveScanResultDetail(otActiveScanResult *aResult)
 {
     void *jsonList = nullptr;
-
-    char xpanidstring[XPANID_LENGTH] = "";
 
     if (aResult == nullptr)
     {
@@ -130,16 +115,10 @@ void UbusServer::HandleActiveScanResultDetail(otActiveScanResult *aResult)
     jsonList = blobmsg_open_table(&mScanBuf, nullptr);
 
     blobmsg_add_string(&mScanBuf, "NetworkName", aResult->mNetworkName.m8);
-
-    OutputBytes(aResult->mExtendedPanId.m8, OT_EXT_PAN_ID_SIZE, xpanidstring);
-    blobmsg_add_string(&mScanBuf, "ExtendedPanId", xpanidstring);
-
+    blobmsg_add_hex_string(&mScanBuf, "ExtendedPanId", aResult->mExtendedPanId.m8, OT_EXT_PAN_ID_SIZE);
     blobmsg_printf(&mScanBuf, "PanId", "0x%04x", aResult->mPanId);
-
     blobmsg_add_u32(&mScanBuf, "Channel", aResult->mChannel);
-
     blobmsg_add_u32(&mScanBuf, "Rssi", aResult->mRssi);
-
     blobmsg_add_u32(&mScanBuf, "Lqi", aResult->mLqi);
 
     blobmsg_close_table(&mScanBuf, jsonList);
@@ -212,21 +191,18 @@ int UbusServer::HandleParent(ubus_request_data *aRequest)
 {
     otError      error = OT_ERROR_NONE;
     otRouterInfo parentInfo;
-    char         extAddress[XPANID_LENGTH] = "";
-    void        *jsonList                  = nullptr;
-    void        *jsonArray                 = nullptr;
+    void        *jsonList  = nullptr;
+    void        *jsonArray = nullptr;
 
     SuccessOrExit(error = otThreadGetParentInfo(mHost->GetInstance(), &parentInfo));
 
     jsonArray = blobmsg_open_array(&mBuf, "parent_list");
     jsonList  = blobmsg_open_table(&mBuf, "parent");
+
     blobmsg_add_string(&mBuf, "Role", "R");
     blobmsg_printf(&mBuf, "Rloc16", "0x%04x", parentInfo.mRloc16);
     blobmsg_printf(&mBuf, "Age", "%3d", parentInfo.mAge);
-
-    OutputBytes(parentInfo.mExtAddress.m8, sizeof(parentInfo.mExtAddress.m8), extAddress);
-    blobmsg_add_string(&mBuf, "ExtAddress", extAddress);
-
+    blobmsg_add_hex_string(&mBuf, "ExtAddress", parentInfo.mExtAddress.m8, sizeof(parentInfo.mExtAddress.m8));
     blobmsg_add_u16(&mBuf, "LinkQualityIn", parentInfo.mLinkQualityIn);
 
     blobmsg_close_table(&mBuf, jsonList);
@@ -241,11 +217,10 @@ int UbusServer::HandleNeighbor(ubus_request_data *aRequest)
 {
     otError                error = OT_ERROR_NONE;
     otNeighborInfo         neighborInfo;
-    otNeighborInfoIterator iterator                  = OT_NEIGHBOR_INFO_ITERATOR_INIT;
-    void                  *jsonList                  = nullptr;
-    void                  *jsonTable                 = nullptr;
-    char                   mode[5]                   = "";
-    char                   extAddress[XPANID_LENGTH] = "";
+    otNeighborInfoIterator iterator  = OT_NEIGHBOR_INFO_ITERATOR_INIT;
+    void                  *jsonList  = nullptr;
+    void                  *jsonTable = nullptr;
+    char                   mode[5]   = "";
 
     jsonList = blobmsg_open_array(&mBuf, "neighbor_list");
 
@@ -274,16 +249,12 @@ int UbusServer::HandleNeighbor(ubus_request_data *aRequest)
             strcat(mode, "n");
         }
         blobmsg_add_string(&mBuf, "Mode", mode);
-
-        OutputBytes(neighborInfo.mExtAddress.m8, sizeof(neighborInfo.mExtAddress.m8), extAddress);
-        blobmsg_add_string(&mBuf, "ExtAddress", extAddress);
-
+        blobmsg_add_hex_string(&mBuf, "ExtAddress", neighborInfo.mExtAddress.m8, sizeof(neighborInfo.mExtAddress.m8));
         blobmsg_add_u16(&mBuf, "LinkQualityIn", neighborInfo.mLinkQualityIn);
 
         blobmsg_close_table(&mBuf, jsonTable);
 
         memset(mode, 0, sizeof(mode));
-        memset(extAddress, 0, sizeof(extAddress));
     }
 
     blobmsg_close_array(&mBuf, jsonList);
@@ -568,34 +539,28 @@ int UbusServer::HandleRloc16(ubus_request_data *aRequest)
 
 int UbusServer::HandleNetworkKey(ubus_request_data *aRequest)
 {
-    char         outputKey[NETWORKKEY_LENGTH] = "";
     otNetworkKey key;
 
     otThreadGetNetworkKey(mHost->GetInstance(), &key);
-    OutputBytes(key.m8, OT_NETWORK_KEY_SIZE, outputKey);
-    blobmsg_add_string(&mBuf, "Networkkey", outputKey);
+    blobmsg_add_hex_string(&mBuf, "Networkkey", key.m8, OT_NETWORK_KEY_SIZE);
     AppendResult(OT_ERROR_NONE, &mContext, aRequest);
     return 0;
 }
 
 int UbusServer::HandlePskc(ubus_request_data *aRequest)
 {
-    char   outputPskc[NETWORKKEY_LENGTH] = "";
     otPskc pskc;
 
     otThreadGetPskc(mHost->GetInstance(), &pskc);
-    OutputBytes(pskc.m8, OT_PSKC_MAX_SIZE, outputPskc);
-    blobmsg_add_string(&mBuf, "pskc", outputPskc);
+    blobmsg_add_hex_string(&mBuf, "pskc", pskc.m8, OT_PSKC_MAX_SIZE);
     AppendResult(OT_ERROR_NONE, &mContext, aRequest);
     return 0;
 }
 
 int UbusServer::HandleExtPanId(ubus_request_data *aRequest)
 {
-    char           outputExtPanId[XPANID_LENGTH] = "";
     const uint8_t *extPanId = reinterpret_cast<const uint8_t *>(otThreadGetExtendedPanId(mHost->GetInstance()));
-    OutputBytes(extPanId, OT_EXT_PAN_ID_SIZE, outputExtPanId);
-    blobmsg_add_string(&mBuf, "ExtPanId", outputExtPanId);
+    blobmsg_add_hex_string(&mBuf, "ExtPanId", extPanId, OT_EXT_PAN_ID_SIZE);
     AppendResult(OT_ERROR_NONE, &mContext, aRequest);
     return 0;
 }
@@ -691,15 +656,12 @@ int UbusServer::HandleJoinerNum(ubus_request_data *aRequest)
     void        *jsonTable = nullptr;
     void        *jsonArray = nullptr;
     otJoinerInfo joinerInfo;
-    uint16_t     iterator        = 0;
-    int          joinerNum       = 0;
-    char         eui64[EXTPANID] = "";
+    uint16_t     iterator  = 0;
+    int          joinerNum = 0;
 
     jsonArray = blobmsg_open_array(&mBuf, "joinerList");
     while (otCommissionerGetNextJoinerInfo(mHost->GetInstance(), &iterator, &joinerInfo) == OT_ERROR_NONE)
     {
-        memset(eui64, 0, sizeof(eui64));
-
         jsonTable = blobmsg_open_table(&mBuf, nullptr);
 
         blobmsg_add_string(&mBuf, "pskd", joinerInfo.mPskd.m8);
@@ -711,8 +673,8 @@ int UbusServer::HandleJoinerNum(ubus_request_data *aRequest)
             break;
         case OT_JOINER_INFO_TYPE_EUI64:
             blobmsg_add_u16(&mBuf, "isAny", 0);
-            OutputBytes(joinerInfo.mSharedId.mEui64.m8, sizeof(joinerInfo.mSharedId.mEui64.m8), eui64);
-            blobmsg_add_string(&mBuf, "eui64", eui64);
+            blobmsg_add_hex_string(&mBuf, "eui64", joinerInfo.mSharedId.mEui64.m8,
+                                   sizeof(joinerInfo.mSharedId.mEui64.m8));
             break;
         case OT_JOINER_INFO_TYPE_DISCERNER:
             blobmsg_add_u16(&mBuf, "isAny", 0);
@@ -767,9 +729,7 @@ int UbusServer::HandleMacFilterAddr(ubus_request_data *aRequest)
 
     while (otLinkFilterGetNextAddress(mHost->GetInstance(), &iterator, &entry) == OT_ERROR_NONE)
     {
-        char extAddress[XPANID_LENGTH] = "";
-        OutputBytes(entry.mExtAddress.m8, sizeof(entry.mExtAddress.m8), extAddress);
-        blobmsg_add_string(&mBuf, "addr", extAddress);
+        blobmsg_add_hex_string(&mBuf, "addr", entry.mExtAddress.m8, sizeof(entry.mExtAddress.m8));
     }
 
     blobmsg_close_array(&mBuf, jsonArray);
