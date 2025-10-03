@@ -39,6 +39,10 @@
 #include "host/rcp_host.hpp"
 #include "openwrt/ubus/ubus_utils.hpp"
 
+#include <functional>
+
+using std::placeholders::_1;
+
 namespace otbr {
 namespace ubus {
 
@@ -74,6 +78,19 @@ static char const *DeviceRoleToString(otDeviceRole aRole)
     return string;
 }
 
+static bool IsAttached(otDeviceRole aRole)
+{
+    switch (aRole)
+    {
+    case OT_DEVICE_ROLE_CHILD:
+    case OT_DEVICE_ROLE_ROUTER:
+    case OT_DEVICE_ROLE_LEADER:
+        return true;
+    default:
+        return false;
+    }
+}
+
 // === UbusServer ===
 
 UbusServer::UbusServer(ubus_context &aContext, Host::RcpHost &aHost)
@@ -92,7 +109,15 @@ void UbusServer::Init()
     if (ubus_add_object(&mContext, &Object()) != 0)
     {
         otbrLogErr("Failed to publish object");
+        ExitNow();
     }
+
+    mHost.GetThreadHelper()->AddDeviceRoleHandler(std::bind(&UbusServer::HandleDeviceRoleChanged, this, _1));
+    mHost.GetThreadHelper()->AddActiveDatasetChangeHandler(
+        std::bind(&UbusServer::HandleActiveDatasetChanged, this, _1));
+
+exit:
+    return;
 }
 
 UbusServer::~UbusServer()
@@ -1095,6 +1120,85 @@ int UbusServer::HandleMacFilterClear(ubus_request_data *aRequest)
     return 0;
 }
 
+int UbusServer::HandleVersion(ubus_request_data *aRequest)
+{
+    blobmsg_add_string(&mBuf, "OtbrVersion", OTBR_PACKAGE_VERSION);
+    blobmsg_add_string(&mBuf, "HostVersion", otGetVersionString());
+    blobmsg_add_string(&mBuf, "RcpVersion", otPlatRadioGetVersionString(mHost.GetInstance()));
+    blobmsg_add_string(&mBuf, "ThreadVersion", mHost.GetThreadVersion());
+    blobmsg_add_u16(&mBuf, "ThreadVersionCode", otThreadGetVersion());
+    SendInvokeResponse(aRequest, &mBuf, OT_ERROR_NONE);
+    return 0;
+}
+
+int UbusServer::HandleStatus(ubus_request_data *aRequest)
+{
+    {
+        otBorderAgentId id;
+        if (otBorderAgentGetId(mHost.GetInstance(), &id) == OT_ERROR_NONE)
+        {
+            blobmsg_add_hex_string(&mBuf, "BorderAgentId", id.mId, sizeof(id.mId));
+        }
+    }
+
+    {
+        otDeviceRole role = otThreadGetDeviceRole(mHost.GetInstance());
+        blobmsg_add_string(&mBuf, "DeviceRole", DeviceRoleToString(role));
+        blobmsg_add_u8(&mBuf, "Attached", IsAttached(role));
+    }
+
+    {
+        otOperationalDatasetTlvs dataset;
+        mHost.GetDatasetActiveTlvs(dataset);
+        blobmsg_add_hex_string(&mBuf, "ActiveDataset", dataset.mTlvs, dataset.mLength);
+        mHost.GetDatasetPendingTlvs(dataset);
+        blobmsg_add_hex_string(&mBuf, "PendingDataset", dataset.mTlvs, dataset.mLength);
+    }
+
+    SendInvokeResponse(aRequest, &mBuf, OT_ERROR_NONE);
+    return 0;
+}
+
+static constexpr blobmsg_policy kProvisionPolicy[] = {
+    [0] = {.name = "dataset", .type = BLOBMSG_TYPE_STRING},
+};
+
+int UbusServer::HandleProvision(ubus_request_data *aRequest, blob_attr *(&aArgs)[1])
+{
+    otError                  error = OT_ERROR_INVALID_ARGS;
+    int                      datasetLength;
+    otOperationalDatasetTlvs dataset;
+
+    VerifyOrExit(aArgs[0] != nullptr);
+    VerifyOrExit((datasetLength = blobmsg_get_hex_string(aArgs[0], dataset.mTlvs, sizeof(dataset.mTlvs))) > 0);
+    dataset.mLength = datasetLength;
+
+    VerifyOrExit(!otIp6IsEnabled(mHost.GetInstance()), error = OT_ERROR_INVALID_STATE);
+
+    SuccessOrExit(error = otDatasetSetActiveTlvs(mHost.GetInstance(), &dataset));
+    SuccessOrExit(error = otIp6SetEnabled(mHost.GetInstance(), true));
+    SuccessOrExit(error = otThreadSetEnabled(mHost.GetInstance(), true));
+
+exit:
+    SendInvokeResponse(aRequest, &mBuf, error);
+    return 0;
+}
+
+void UbusServer::HandleDeviceRoleChanged(otDeviceRole aRole)
+{
+    blob_buf_init(&mBuf, 0);
+    blobmsg_add_string(&mBuf, "DeviceRole", DeviceRoleToString(aRole));
+    blobmsg_add_u8(&mBuf, "Attached", IsAttached(aRole));
+    ubus_notify(&mContext, &Object(), "device_role_changed", mBuf.head, -1);
+}
+
+void UbusServer::HandleActiveDatasetChanged(const otOperationalDatasetTlvs &aDataset)
+{
+    blob_buf_init(&mBuf, 0);
+    blobmsg_add_hex_string(&mBuf, "ActiveDataset", aDataset.mTlvs, aDataset.mLength);
+    ubus_notify(&mContext, &Object(), "active_dataset_changed", mBuf.head, -1);
+}
+
 const ubus_method UbusServer::sMethods[] = {
     OTBR_UBUS_METHOD_NOARG("channel", &UbusServer::HandleChannel),
     OTBR_UBUS_METHOD("setchannel", &UbusServer::HandleSetChannel, kSetChannelPolicy),
@@ -1137,6 +1241,10 @@ const ubus_method UbusServer::sMethods[] = {
     OTBR_UBUS_METHOD_NOARG("macfilterstate", &UbusServer::HandleMacFilterState),
     OTBR_UBUS_METHOD("macfiltersetstate", &UbusServer::HandleMacFilterSetState, kMacfilterSetStatePolicy),
     OTBR_UBUS_METHOD_NOARG("macfilteraddr", &UbusServer::HandleMacFilterAddr),
+
+    OTBR_UBUS_METHOD_NOARG("version", &UbusServer::HandleVersion),
+    OTBR_UBUS_METHOD_NOARG("status", &UbusServer::HandleStatus),
+    OTBR_UBUS_METHOD("provision", &UbusServer::HandleProvision, kProvisionPolicy),
 };
 
 ubus_object_type UbusServer::sObjectType = UBUS_OBJECT_TYPE("otbr", sMethods);

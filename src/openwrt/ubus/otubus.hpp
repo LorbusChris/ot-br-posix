@@ -116,6 +116,10 @@ private:
     int HandleMacFilterSetState(ubus_request_data *aRequest, blob_attr *(&aArgs)[1]);
     int HandleMacFilterAddr(ubus_request_data *aRequest);
 
+    int HandleVersion(ubus_request_data *aRequest);
+    int HandleStatus(ubus_request_data *aRequest);
+    int HandleProvision(ubus_request_data *aRequest, blob_attr *(&aArgs)[1]);
+
     // === Callbacks ===
 
     // otThreadSendDiagnosticGet callback
@@ -139,6 +143,10 @@ private:
     void        HandleJoinerEvent(otCommissionerJoinerEvent aEvent,
                                   const otJoinerInfo       *aJoinerInfo,
                                   const otExtAddress       *aJoinerId);
+
+    // ThreadHelper callbacks
+    void HandleDeviceRoleChanged(otDeviceRole role);
+    void HandleActiveDatasetChanged(const otOperationalDatasetTlvs &dataset);
 
     // === Internal helpers ===
 
