@@ -115,6 +115,18 @@ struct UbusMethodHandler
 // Returns 0 on success, or -1 on error
 int blobmsg_add_hex_string(blob_buf *aBuf, const char *aName, const uint8_t *aData, unsigned int aLength);
 
+// Like blobmsg_get_string(), but decodes the hex string into the provided output buffer.
+// An error is returned if the string contains invalid characters, or would decode to
+// more than aLength bytes. Returns the number of bytes decoded on success, or -1 on error.
+int blobmsg_get_hex_string(blob_attr *aAttr, uint8_t *aOut, int aOutSize);
+
+// Like blobmsg_get_hex_string(), but validates that exactly aOutSize bytes are decoded.
+inline int blobmsg_get_hex_string_fixed(blob_attr *aAttr, uint8_t *aOut, int aOutSize)
+{
+    VerifyOrReturn(blobmsg_get_hex_string(aAttr, aOut, aOutSize) == aOutSize, -1);
+    return aOutSize;
+}
+
 } // namespace ubus
 } // namespace otbr
 

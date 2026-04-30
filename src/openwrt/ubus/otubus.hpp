@@ -171,17 +171,6 @@ private:
     otError ParseLong(char *aString, long &aLong);
 
     /**
-     * This method converts a hex string to binary.
-     *
-     * @param[in]  aHex        A pointer to the hex string.
-     * @param[out] aBin        A pointer to where the binary representation is placed.
-     * @param[in]  aBinLength  Maximum length of the binary representation.
-     *
-     * @returns The number of bytes in the binary representation.
-     */
-    int Hex2Bin(const char *aHex, uint8_t *aBin, uint16_t aBinLength);
-
-    /**
      * This method append result in message passed to ubus.
      *
      * @param[in] aError    The error type of the message.

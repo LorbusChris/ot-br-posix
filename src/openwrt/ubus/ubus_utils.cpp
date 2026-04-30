@@ -27,6 +27,9 @@
  */
 
 #include "openwrt/ubus/ubus_utils.hpp"
+#include "common/code_utils.hpp"
+
+#include <limits.h>
 
 namespace otbr {
 namespace ubus {
@@ -43,6 +46,47 @@ int blobmsg_add_hex_string(blob_buf *aBuf, const char *aName, const uint8_t *aDa
     }
     blobmsg_add_string_buffer(aBuf);
     return 0;
+}
+
+static int HexDigit(char c)
+{
+    int result = -1;
+    if ('0' <= c && c <= '9')
+    {
+        result = c - '0';
+    }
+    else if ('a' <= c && c <= 'f')
+    {
+        result = c - 'a' + 10;
+    }
+    else if ('A' <= c && c <= 'F')
+    {
+        result = c - 'A' + 10;
+    }
+    return result;
+}
+
+int blobmsg_get_hex_string(blob_attr *aAttr, uint8_t *aOut, int aOutSize)
+{
+    VerifyOrReturn(aOut != nullptr && 0 <= aOutSize && aOutSize <= INT_MAX, -1);
+
+    char const *hex = blobmsg_get_string(aAttr); // handles null by returning null
+    VerifyOrReturn(hex != nullptr, -1);
+
+    size_t hexLength = strlen(hex);
+    VerifyOrReturn(hexLength % 2 == 0, -1);
+    size_t binLength = hexLength / 2;
+    VerifyOrReturn(binLength <= static_cast<size_t>(aOutSize), -1);
+
+    char const *hexEnd = hex + hexLength;
+    while (hex < hexEnd)
+    {
+        int hi = HexDigit(*hex++);
+        int lo = HexDigit(*hex++);
+        VerifyOrReturn(hi >= 0 && lo >= 0, -1);
+        *aOut++ = (hi << 4) | lo;
+    }
+    return binLength;
 }
 
 } // namespace ubus
