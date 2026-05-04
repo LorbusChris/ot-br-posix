@@ -33,7 +33,7 @@ include $(TOPDIR)/rules.mk
 PKG_NAME:=openthread-br
 PKG_LICENSE:=BSD-3-Clause
 PKG_LICENSE_FILES:=LICENSE
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 PKG_VERSION:=1.0
 
 include $(INCLUDE_DIR)/package.mk
@@ -70,11 +70,36 @@ define Package/openthread-br
 		+libjson-c \
 		+libstdcpp \
 		+libubus \
-		+luci-lua-runtime
+		+luci-base \
+		+rpcd-mod-ucode \
+		+ucode-mod-ubus
 endef
 
 define Package/openthread-br/description
     A Thread border router for POSIX-based platforms.
+endef
+
+# Mirror what LuCI's luci.mk generates for every LuCI app: without this,
+# rpcd never registers the new luci.openthread ucode plugin and the stale
+# dispatcher cache keeps the old menu tree until the next reboot.
+define Package/openthread-br/postinst
+#!/bin/sh
+[ -n "$${IPKG_INSTROOT}" ] || {
+	rm -f /tmp/luci-indexcache.*
+	rm -rf /tmp/luci-modulecache/
+	killall -HUP rpcd 2>/dev/null
+	exit 0
+}
+endef
+
+define Package/openthread-br/postrm
+#!/bin/sh
+[ -n "$${IPKG_INSTROOT}" ] || {
+	rm -f /tmp/luci-indexcache.*
+	rm -rf /tmp/luci-modulecache/
+	killall -HUP rpcd 2>/dev/null
+	exit 0
+}
 endef
 
 define Package/openthread-br/install
@@ -88,14 +113,25 @@ define Package/openthread-br/install
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) $(PKG_INSTALL_DIR)/etc/config/* $(1)/etc/config
 
-	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/controller/admin
-	$(INSTALL_BIN) $(LOCAL_SOURCE_DIR)/src/openwrt/controller/thread.lua $(1)/usr/lib/lua/luci/controller/admin
+	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/openthread
+	$(CP) $(LOCAL_SOURCE_DIR)/src/openwrt/luci-app-openthread/htdocs/luci-static/resources/view/openthread/* \
+	    $(1)/www/luci-static/resources/view/openthread/
 
-	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/view
-	$(CP) $(LOCAL_SOURCE_DIR)/src/openwrt/view/admin_thread $(1)/usr/lib/lua/luci/view
+	$(INSTALL_DIR) $(1)/www/luci-static/resources/openthread
+	$(CP) $(LOCAL_SOURCE_DIR)/src/openwrt/luci-app-openthread/htdocs/luci-static/resources/openthread/* \
+	    $(1)/www/luci-static/resources/openthread/
 
-	$(INSTALL_DIR) $(1)/www/luci-static/resources
-	$(CP) $(LOCAL_SOURCE_DIR)/src/openwrt/handle_error.js $(1)/www/luci-static/resources
+	$(INSTALL_DIR) $(1)/usr/share/luci/menu.d
+	$(INSTALL_DATA) $(LOCAL_SOURCE_DIR)/src/openwrt/luci-app-openthread/root/usr/share/luci/menu.d/luci-app-openthread.json \
+	    $(1)/usr/share/luci/menu.d/
+
+	$(INSTALL_DIR) $(1)/usr/share/rpcd/acl.d
+	$(INSTALL_DATA) $(LOCAL_SOURCE_DIR)/src/openwrt/luci-app-openthread/root/usr/share/rpcd/acl.d/luci-app-openthread.json \
+	    $(1)/usr/share/rpcd/acl.d/
+
+	$(INSTALL_DIR) $(1)/usr/share/rpcd/ucode
+	$(INSTALL_DATA) $(LOCAL_SOURCE_DIR)/src/openwrt/luci-app-openthread/root/usr/share/rpcd/ucode/luci.openthread \
+	    $(1)/usr/share/rpcd/ucode/
 endef
 
 $(eval $(call BuildPackage,openthread-br))

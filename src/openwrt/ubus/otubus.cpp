@@ -254,7 +254,7 @@ void UbusServer::OutputBytes(const uint8_t *aBytes, uint8_t aLength, char *aOutp
 
 void UbusServer::AppendResult(otError aError, struct ubus_context *aContext, struct ubus_request_data *aRequest)
 {
-    blobmsg_add_u16(&mBuf, "Error", aError);
+    blobmsg_add_u16(&mBuf, "error", aError);
     ubus_send_reply(aContext, aRequest, mBuf.head);
 }
 
@@ -274,19 +274,19 @@ void UbusServer::HandleActiveScanResultDetail(otActiveScanResult *aResult)
 
     jsonList = blobmsg_open_table(&mBuf, nullptr);
 
-    blobmsg_add_string(&mBuf, "NetworkName", aResult->mNetworkName.m8);
+    blobmsg_add_string(&mBuf, "networkname", aResult->mNetworkName.m8);
 
     OutputBytes(aResult->mExtendedPanId.m8, OT_EXT_PAN_ID_SIZE, xpanidstring);
-    blobmsg_add_string(&mBuf, "ExtendedPanId", xpanidstring);
+    blobmsg_add_string(&mBuf, "extpanid", xpanidstring);
 
     sprintf(panidstring, "0x%04x", aResult->mPanId);
-    blobmsg_add_string(&mBuf, "PanId", panidstring);
+    blobmsg_add_string(&mBuf, "panid", panidstring);
 
-    blobmsg_add_u32(&mBuf, "Channel", aResult->mChannel);
+    blobmsg_add_u32(&mBuf, "channel", aResult->mChannel);
 
-    blobmsg_add_u32(&mBuf, "Rssi", aResult->mRssi);
+    blobmsg_add_u32(&mBuf, "rssi", aResult->mRssi);
 
-    blobmsg_add_u32(&mBuf, "Lqi", aResult->mLqi);
+    blobmsg_add_u32(&mBuf, "lqi", aResult->mLqi);
 
     blobmsg_close_table(&mBuf, jsonList);
 
@@ -755,18 +755,18 @@ int UbusServer::UbusParentHandlerDetail(struct ubus_context      *aContext,
 
     jsonArray = blobmsg_open_array(&mBuf, "parent_list");
     jsonList  = blobmsg_open_table(&mBuf, "parent");
-    blobmsg_add_string(&mBuf, "Role", "R");
+    blobmsg_add_string(&mBuf, "role", "R");
 
     sprintf(transfer, "0x%04x", parentInfo.mRloc16);
-    blobmsg_add_string(&mBuf, "Rloc16", transfer);
+    blobmsg_add_string(&mBuf, "rloc16", transfer);
 
     sprintf(transfer, "%3d", parentInfo.mAge);
-    blobmsg_add_string(&mBuf, "Age", transfer);
+    blobmsg_add_string(&mBuf, "age", transfer);
 
     OutputBytes(parentInfo.mExtAddress.m8, sizeof(parentInfo.mExtAddress.m8), extAddress);
-    blobmsg_add_string(&mBuf, "ExtAddress", extAddress);
+    blobmsg_add_string(&mBuf, "ext_address", extAddress);
 
-    blobmsg_add_u16(&mBuf, "LinkQualityIn", parentInfo.mLinkQualityIn);
+    blobmsg_add_u16(&mBuf, "link_quality_in", parentInfo.mLinkQualityIn);
 
     blobmsg_close_table(&mBuf, jsonList);
     blobmsg_close_array(&mBuf, jsonArray);
@@ -804,19 +804,19 @@ int UbusServer::UbusNeighborHandlerDetail(struct ubus_context      *aContext,
     {
         jsonList = blobmsg_open_table(&mBuf, nullptr);
 
-        blobmsg_add_string(&mBuf, "Role", neighborInfo.mIsChild ? "C" : "R");
+        blobmsg_add_string(&mBuf, "role", neighborInfo.mIsChild ? "C" : "R");
 
         sprintf(transfer, "0x%04x", neighborInfo.mRloc16);
-        blobmsg_add_string(&mBuf, "Rloc16", transfer);
+        blobmsg_add_string(&mBuf, "rloc16", transfer);
 
         sprintf(transfer, "%3d", neighborInfo.mAge);
-        blobmsg_add_string(&mBuf, "Age", transfer);
+        blobmsg_add_string(&mBuf, "age", transfer);
 
         sprintf(transfer, "%8d", neighborInfo.mAverageRssi);
-        blobmsg_add_string(&mBuf, "AvgRssi", transfer);
+        blobmsg_add_string(&mBuf, "avg_rssi", transfer);
 
         sprintf(transfer, "%9d", neighborInfo.mLastRssi);
-        blobmsg_add_string(&mBuf, "LastRssi", transfer);
+        blobmsg_add_string(&mBuf, "last_rssi", transfer);
 
         if (neighborInfo.mRxOnWhenIdle)
         {
@@ -832,12 +832,12 @@ int UbusServer::UbusNeighborHandlerDetail(struct ubus_context      *aContext,
         {
             strcat(mode, "n");
         }
-        blobmsg_add_string(&mBuf, "Mode", mode);
+        blobmsg_add_string(&mBuf, "mode", mode);
 
         OutputBytes(neighborInfo.mExtAddress.m8, sizeof(neighborInfo.mExtAddress.m8), extAddress);
-        blobmsg_add_string(&mBuf, "ExtAddress", extAddress);
+        blobmsg_add_string(&mBuf, "ext_address", extAddress);
 
-        blobmsg_add_u16(&mBuf, "LinkQualityIn", neighborInfo.mLinkQualityIn);
+        blobmsg_add_u16(&mBuf, "link_quality_in", neighborInfo.mLinkQualityIn);
 
         blobmsg_close_table(&mBuf, jsonList);
 
@@ -1089,24 +1089,24 @@ int UbusServer::UbusGetInformation(struct ubus_context      *aContext,
 
     mHostMutex->lock();
     if (!strcmp(aAction, "networkname"))
-        blobmsg_add_string(&mBuf, "NetworkName", otThreadGetNetworkName(mHost->GetInstance()));
+        blobmsg_add_string(&mBuf, "networkname", otThreadGetNetworkName(mHost->GetInstance()));
     else if (!strcmp(aAction, "interfacename"))
     {
-        blobmsg_add_string(&mBuf, "InterfaceName", mHost->GetInterfaceName());
+        blobmsg_add_string(&mBuf, "interfacename", mHost->GetInterfaceName());
     }
     else if (!strcmp(aAction, "state"))
     {
         char state[10];
         GetState(mHost->GetInstance(), state);
-        blobmsg_add_string(&mBuf, "State", state);
+        blobmsg_add_string(&mBuf, "state", state);
     }
     else if (!strcmp(aAction, "channel"))
-        blobmsg_add_u32(&mBuf, "Channel", otLinkGetChannel(mHost->GetInstance()));
+        blobmsg_add_u32(&mBuf, "channel", otLinkGetChannel(mHost->GetInstance()));
     else if (!strcmp(aAction, "panid"))
     {
         char panIdString[PANID_LENGTH];
         sprintf(panIdString, "0x%04x", otLinkGetPanId(mHost->GetInstance()));
-        blobmsg_add_string(&mBuf, "PanId", panIdString);
+        blobmsg_add_string(&mBuf, "panid", panIdString);
     }
     else if (!strcmp(aAction, "rloc16"))
     {
@@ -1121,7 +1121,7 @@ int UbusServer::UbusGetInformation(struct ubus_context      *aContext,
 
         otThreadGetNetworkKey(mHost->GetInstance(), &key);
         OutputBytes(key.m8, OT_NETWORK_KEY_SIZE, outputKey);
-        blobmsg_add_string(&mBuf, "Networkkey", outputKey);
+        blobmsg_add_string(&mBuf, "networkkey", outputKey);
     }
     else if (!strcmp(aAction, "pskc"))
     {
@@ -1137,7 +1137,7 @@ int UbusServer::UbusGetInformation(struct ubus_context      *aContext,
         char           outputExtPanId[XPANID_LENGTH] = "";
         const uint8_t *extPanId = reinterpret_cast<const uint8_t *>(otThreadGetExtendedPanId(mHost->GetInstance()));
         OutputBytes(extPanId, OT_EXT_PAN_ID_SIZE, outputExtPanId);
-        blobmsg_add_string(&mBuf, "ExtPanId", outputExtPanId);
+        blobmsg_add_string(&mBuf, "extpanid", outputExtPanId);
     }
     else if (!strcmp(aAction, "mode"))
     {
@@ -1162,11 +1162,11 @@ int UbusServer::UbusGetInformation(struct ubus_context      *aContext,
         {
             strcat(mode, "n");
         }
-        blobmsg_add_string(&mBuf, "Mode", mode);
+        blobmsg_add_string(&mBuf, "mode", mode);
     }
     else if (!strcmp(aAction, "partitionid"))
     {
-        blobmsg_add_u32(&mBuf, "Partitionid", otThreadGetPartitionId(mHost->GetInstance()));
+        blobmsg_add_u32(&mBuf, "partitionid", otThreadGetPartitionId(mHost->GetInstance()));
     }
     else if (!strcmp(aAction, "leaderdata"))
     {
@@ -1176,11 +1176,11 @@ int UbusServer::UbusGetInformation(struct ubus_context      *aContext,
 
         sJsonUri = blobmsg_open_table(&mBuf, "leaderdata");
 
-        blobmsg_add_u32(&mBuf, "PartitionId", leaderData.mPartitionId);
-        blobmsg_add_u32(&mBuf, "Weighting", leaderData.mWeighting);
-        blobmsg_add_u32(&mBuf, "DataVersion", leaderData.mDataVersion);
-        blobmsg_add_u32(&mBuf, "StableDataVersion", leaderData.mStableDataVersion);
-        blobmsg_add_u32(&mBuf, "LeaderRouterId", leaderData.mLeaderRouterId);
+        blobmsg_add_u32(&mBuf, "partitionid", leaderData.mPartitionId);
+        blobmsg_add_u32(&mBuf, "weighting", leaderData.mWeighting);
+        blobmsg_add_u32(&mBuf, "data_version", leaderData.mDataVersion);
+        blobmsg_add_u32(&mBuf, "stable_data_version", leaderData.mStableDataVersion);
+        blobmsg_add_u32(&mBuf, "leader_router_id", leaderData.mLeaderRouterId);
 
         blobmsg_close_table(&mBuf, sJsonUri);
     }
@@ -1221,7 +1221,7 @@ int UbusServer::UbusGetInformation(struct ubus_context      *aContext,
 
         blob_buf_init(&mBuf, 0);
 
-        jsonArray = blobmsg_open_array(&mBuf, "joinerList");
+        jsonArray = blobmsg_open_array(&mBuf, "joinerlist");
         while (otCommissionerGetNextJoinerInfo(mHost->GetInstance(), &iterator, &joinerInfo) == OT_ERROR_NONE)
         {
             memset(eui64, 0, sizeof(eui64));
@@ -1233,17 +1233,17 @@ int UbusServer::UbusGetInformation(struct ubus_context      *aContext,
             switch (joinerInfo.mType)
             {
             case OT_JOINER_INFO_TYPE_ANY:
-                blobmsg_add_u16(&mBuf, "isAny", 1);
+                blobmsg_add_u16(&mBuf, "is_any", 1);
                 break;
             case OT_JOINER_INFO_TYPE_EUI64:
-                blobmsg_add_u16(&mBuf, "isAny", 0);
+                blobmsg_add_u16(&mBuf, "is_any", 0);
                 OutputBytes(joinerInfo.mSharedId.mEui64.m8, sizeof(joinerInfo.mSharedId.mEui64.m8), eui64);
                 blobmsg_add_string(&mBuf, "eui64", eui64);
                 break;
             case OT_JOINER_INFO_TYPE_DISCERNER:
-                blobmsg_add_u16(&mBuf, "isAny", 0);
-                blobmsg_add_u64(&mBuf, "discernerValue", joinerInfo.mSharedId.mDiscerner.mValue);
-                blobmsg_add_u16(&mBuf, "discernerLength", joinerInfo.mSharedId.mDiscerner.mLength);
+                blobmsg_add_u16(&mBuf, "is_any", 0);
+                blobmsg_add_u64(&mBuf, "discerner_value", joinerInfo.mSharedId.mDiscerner.mValue);
+                blobmsg_add_u16(&mBuf, "discerner_length", joinerInfo.mSharedId.mDiscerner.mLength);
                 break;
             }
 
