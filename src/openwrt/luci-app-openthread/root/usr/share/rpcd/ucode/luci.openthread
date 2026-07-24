@@ -89,12 +89,24 @@ return {
 		},
 		scan: {
 			args: {},
-			call: function() {
-				let r = otbr('scan');
-				return { scan_list: r.scan_list ?? [], error: r.error ?? 0 };
+			call: function(req) {
+				// Deferred: rpcd keeps serving other requests while the
+				// scan runs; the reply completes from the defer callback.
+				let replied = false;
+				let d = ubus.defer('otbr', 'scan', {}, function(rc, reply) {
+					replied = true;
+					req.reply({
+						scan_list: reply?.scan_list ?? [],
+						error: reply?.error ?? (rc ? 255 : 0),
+					});
+				});
+
+				if (!d)
+					return replied ? null : { scan_list: [], error: 255 };
+
+				return d;
 			}
 		},
-
 		settings_apply: {
 			args: {
 				networkname: 'string',

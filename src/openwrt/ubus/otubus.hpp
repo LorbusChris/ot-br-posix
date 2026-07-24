@@ -39,6 +39,8 @@
 #include <stdarg.h>
 #include <time.h>
 
+#include <atomic>
+
 #include <openthread/ip6.h>
 #include <openthread/link.h>
 #include <openthread/netdiag.h>
@@ -745,17 +747,27 @@ public:
     void HandleDiagnosticGetResponse(otError aError, otMessage *aMessage, const otMessageInfo *aMessageInfo);
 
 private:
-    bool                 mIfFinishScan;
-    struct ubus_context *mContext;
-    const char          *mSockPath;
-    struct blob_buf      mBuf;
-    struct blob_buf      mNetworkdataBuf;
-    Host::RcpHost       *mHost;
-    std::mutex          *mHostMutex;
-    time_t               mSecond;
+    std::atomic<bool>        mIfFinishScan;
+    std::atomic<bool>        mScanInFlight;
+    struct blob_buf          mScanBuf;
+    void                    *mScanJsonUri;
+    struct ubus_request_data mScanRequest;
+    struct uloop_timeout     mScanPollTimeout;
+    int                      mScanElapsedMs;
+    struct ubus_context     *mContext;
+    const char              *mSockPath;
+    struct blob_buf          mBuf;
+    struct blob_buf          mNetworkdataBuf;
+    Host::RcpHost           *mHost;
+    std::mutex              *mHostMutex;
+    time_t                   mSecond;
     enum
     {
         kDefaultJoinerTimeout = 120,
+        kScanPollIntervalMs   = 100,
+        // Below the client-side timeouts (LuCI rpc 20 s, ucode ubus 30 s)
+        // so the daemon-side timeout is the one that surfaces to the user.
+        kScanTimeoutMs        = 15 * 1000,
     };
 
     /**
@@ -769,7 +781,19 @@ private:
     /**
      * This method start scan.
      */
-    void ProcessScan(void);
+    otError ProcessScan(void);
+
+    /**
+     * This method is the uloop timer trampoline used to poll for scan completion.
+     *
+     * @param[in] aTimeout  A pointer to the expired uloop timeout.
+     */
+    static void HandleScanPollTimeout(struct uloop_timeout *aTimeout);
+
+    /**
+     * This method polls for scan completion and completes the deferred scan request.
+     */
+    void HandleScanPollTimeoutDetail(void);
 
     /**
      * This method detailly start scan.

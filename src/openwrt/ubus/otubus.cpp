@@ -60,6 +60,9 @@ const static int NETWORKKEY_LENGTH = 64;
 
 UbusServer::UbusServer(Host::RcpHost *aHost, std::mutex *aMutex)
     : mIfFinishScan(false)
+    , mScanInFlight(false)
+    , mScanJsonUri(nullptr)
+    , mScanElapsedMs(0)
     , mContext(nullptr)
     , mSockPath(nullptr)
     , mHost(aHost)
@@ -68,9 +71,14 @@ UbusServer::UbusServer(Host::RcpHost *aHost, std::mutex *aMutex)
 {
     memset(&mNetworkdataBuf, 0, sizeof(mNetworkdataBuf));
     memset(&mBuf, 0, sizeof(mBuf));
+    memset(&mScanBuf, 0, sizeof(mScanBuf));
+    memset(&mScanRequest, 0, sizeof(mScanRequest));
+    memset(&mScanPollTimeout, 0, sizeof(mScanPollTimeout));
+    mScanPollTimeout.cb = &UbusServer::HandleScanPollTimeout;
 
     blob_buf_init(&mBuf, 0);
     blob_buf_init(&mNetworkdataBuf, 0);
+    blob_buf_init(&mScanBuf, 0);
 }
 
 UbusServer &UbusServer::GetInstance(void)
@@ -223,7 +231,7 @@ static struct ubus_object otbr = {
     n_methods : ARRAY_SIZE(otbrMethods),
 };
 
-void UbusServer::ProcessScan(void)
+otError UbusServer::ProcessScan(void)
 {
     otError  error        = OT_ERROR_NONE;
     uint32_t scanChannels = 0;
@@ -234,7 +242,7 @@ void UbusServer::ProcessScan(void)
                                            &UbusServer::HandleActiveScanResult, this));
 exit:
     mHostMutex->unlock();
-    return;
+    return error;
 }
 
 void UbusServer::HandleActiveScanResult(otActiveScanResult *aResult, void *aContext)
@@ -265,30 +273,33 @@ void UbusServer::HandleActiveScanResultDetail(otActiveScanResult *aResult)
     char panidstring[PANID_LENGTH];
     char xpanidstring[XPANID_LENGTH] = "";
 
+    // The deferred request was abandoned (timeout); results are stale.
+    VerifyOrExit(mScanInFlight);
+
     if (aResult == nullptr)
     {
-        blobmsg_close_array(&mBuf, sJsonUri);
+        blobmsg_close_array(&mScanBuf, mScanJsonUri);
         mIfFinishScan = true;
         goto exit;
     }
 
-    jsonList = blobmsg_open_table(&mBuf, nullptr);
+    jsonList = blobmsg_open_table(&mScanBuf, nullptr);
 
-    blobmsg_add_string(&mBuf, "networkname", aResult->mNetworkName.m8);
+    blobmsg_add_string(&mScanBuf, "networkname", aResult->mNetworkName.m8);
 
     OutputBytes(aResult->mExtendedPanId.m8, OT_EXT_PAN_ID_SIZE, xpanidstring);
-    blobmsg_add_string(&mBuf, "extpanid", xpanidstring);
+    blobmsg_add_string(&mScanBuf, "extpanid", xpanidstring);
 
     sprintf(panidstring, "0x%04x", aResult->mPanId);
-    blobmsg_add_string(&mBuf, "panid", panidstring);
+    blobmsg_add_string(&mScanBuf, "panid", panidstring);
 
-    blobmsg_add_u32(&mBuf, "channel", aResult->mChannel);
+    blobmsg_add_u32(&mScanBuf, "channel", aResult->mChannel);
 
-    blobmsg_add_u32(&mBuf, "rssi", aResult->mRssi);
+    blobmsg_add_u32(&mScanBuf, "rssi", aResult->mRssi);
 
-    blobmsg_add_u32(&mBuf, "lqi", aResult->mLqi);
+    blobmsg_add_u32(&mScanBuf, "lqi", aResult->mLqi);
 
-    blobmsg_close_table(&mBuf, jsonList);
+    blobmsg_close_table(&mScanBuf, jsonList);
 
 exit:
     return;
@@ -313,32 +324,93 @@ int UbusServer::UbusScanHandlerDetail(struct ubus_context      *aContext,
     OT_UNUSED_VARIABLE(aMethod);
     OT_UNUSED_VARIABLE(aMsg);
 
-    otError  error = OT_ERROR_NONE;
-    uint64_t eventNum;
+    otError  error    = OT_ERROR_NONE;
+    uint64_t eventNum = 1;
     ssize_t  retval;
 
-    blob_buf_init(&mBuf, 0);
-    sJsonUri = blobmsg_open_array(&mBuf, "scan_list");
-
-    mIfFinishScan = 0;
-    sUbusServerInstance->ProcessScan();
-
-    eventNum = 1;
-    retval   = write(sUbusEfd, &eventNum, sizeof(uint64_t));
-    if (retval != sizeof(uint64_t))
+    if (mScanInFlight)
     {
-        error = OT_ERROR_FAILED;
+        error = OT_ERROR_BUSY;
         goto exit;
     }
 
-    while (!mIfFinishScan)
+    // Prepare the scan state under the host mutex: the scan result callback
+    // only runs while the main loop holds it, so no callback can observe a
+    // half-initialized buffer or miss the in-flight flag.
+    mHostMutex->lock();
+    blob_buf_init(&mScanBuf, 0);
+    mScanJsonUri   = blobmsg_open_array(&mScanBuf, "scan_list");
+    mIfFinishScan  = false;
+    mScanElapsedMs = 0;
+    mScanInFlight  = true;
+    mHostMutex->unlock();
+
+    if ((error = ProcessScan()) != OT_ERROR_NONE)
     {
-        sleep(1);
+        mScanInFlight = false;
+        goto exit;
     }
 
+    retval = write(sUbusEfd, &eventNum, sizeof(uint64_t));
+    if (retval != sizeof(uint64_t))
+    {
+        // The scan itself keeps running; its results are dropped by the
+        // !mScanInFlight guard in the result callback.
+        mScanInFlight = false;
+        error         = OT_ERROR_FAILED;
+        goto exit;
+    }
+
+    // Do not block the uloop thread while the scan runs: park the request
+    // and let the poll timer complete it once the scan callback finishes.
+    ubus_defer_request(aContext, aRequest, &mScanRequest);
+    uloop_timeout_set(&mScanPollTimeout, kScanPollIntervalMs);
+    return 0;
+
 exit:
+    blob_buf_init(&mBuf, 0);
     AppendResult(error, aContext, aRequest);
     return 0;
+}
+
+void UbusServer::HandleScanPollTimeout(struct uloop_timeout *aTimeout)
+{
+    OT_UNUSED_VARIABLE(aTimeout);
+
+    GetInstance().HandleScanPollTimeoutDetail();
+}
+
+void UbusServer::HandleScanPollTimeoutDetail(void)
+{
+    VerifyOrExit(mScanInFlight);
+
+    if (mIfFinishScan)
+    {
+        mScanInFlight = false;
+        blobmsg_add_u16(&mScanBuf, "error", OT_ERROR_NONE);
+        ubus_send_reply(mContext, &mScanRequest, mScanBuf.head);
+        ubus_complete_deferred_request(mContext, &mScanRequest, UBUS_STATUS_OK);
+        goto exit;
+    }
+
+    mScanElapsedMs += kScanPollIntervalMs;
+    if (mScanElapsedMs >= kScanTimeoutMs)
+    {
+        // Abandon the scan. Clearing the flag under the host mutex serializes
+        // against an in-progress result callback; later callbacks bail out.
+        mHostMutex->lock();
+        mScanInFlight = false;
+        mHostMutex->unlock();
+        blob_buf_init(&mBuf, 0);
+        AppendResult(OT_ERROR_RESPONSE_TIMEOUT, mContext, &mScanRequest);
+        ubus_complete_deferred_request(mContext, &mScanRequest, UBUS_STATUS_OK);
+        goto exit;
+    }
+
+    uloop_timeout_set(&mScanPollTimeout, kScanPollIntervalMs);
+
+exit:
+    return;
 }
 
 int UbusServer::UbusChannelHandler(struct ubus_context      *aContext,
@@ -1686,6 +1758,18 @@ void UbusServer::UbusReconnTimerDetail(struct uloop_timeout *aTimeout)
 void UbusServer::UbusConnectionLost(struct ubus_context *aContext)
 {
     OT_UNUSED_VARIABLE(aContext);
+
+    UbusServer &server = GetInstance();
+
+    // Drop any deferred scan: the requester died with the connection, and
+    // the stored request ids are no longer valid after a reconnect.
+    if (server.mScanInFlight)
+    {
+        uloop_timeout_cancel(&server.mScanPollTimeout);
+        server.mHostMutex->lock();
+        server.mScanInFlight = false;
+        server.mHostMutex->unlock();
+    }
 
     UbusReconnTimer(nullptr);
 }
