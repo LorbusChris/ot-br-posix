@@ -1214,16 +1214,45 @@ int UbusServer::HandleProvision(ubus_request_data *aRequest, blob_attr *(&aArgs)
         // refuse to run. SetThreadEnabled() is what moves that state, and it is
         // idempotent.
         mHost.SetThreadEnabled(true, [this, dataset, respond](otError aError, const std::string &aInfo) {
+            otError error = aError;
+
             // NCP does not implement SetThreadEnabled and does not need it: its
             // Join() has no enabled-state precondition.
-            if (aError != OT_ERROR_NONE && aError != OT_ERROR_NOT_IMPLEMENTED)
+            if (error == OT_ERROR_NOT_IMPLEMENTED)
             {
-                respond(aError, aInfo);
+                error = OT_ERROR_NONE;
             }
-            else
+
+            if (error == OT_ERROR_NONE)
             {
-                mHost.Join(dataset, respond);
+                // Commit the dataset here so a malformed one still fails the
+                // call; Join() commits the same TLVs again.
+                error = otDatasetSetActiveTlvs(mHost.GetInstance(), &dataset);
             }
+
+            if (error != OT_ERROR_NONE)
+            {
+                respond(error, aInfo);
+                return;
+            }
+
+            // Respond once the join is under way rather than when the device
+            // attaches: attaching takes long enough that callers time out
+            // waiting, and the Matter TBRM delegate has to answer its
+            // controller well before then. The attach outcome is reported
+            // through the device_role_changed notification.
+            mHost.Join(dataset, [](otError aJoinError, const std::string &aJoinInfo) {
+                if (aJoinError == OT_ERROR_NONE)
+                {
+                    otbrLogInfo("provision: join succeeded");
+                }
+                else
+                {
+                    otbrLogWarning("provision: join failed: %s (%s)", otThreadErrorToString(aJoinError),
+                                   aJoinInfo.c_str());
+                }
+            });
+            respond(OT_ERROR_NONE, "");
         });
     }
 
