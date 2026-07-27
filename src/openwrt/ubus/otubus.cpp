@@ -1232,6 +1232,32 @@ exit:
     return 0;
 }
 
+static constexpr blobmsg_policy kSetPendingPolicy[] = {
+    [0] = {.name = "dataset", .type = BLOBMSG_TYPE_STRING},
+};
+
+int UbusServer::HandleSetPending(ubus_request_data *aRequest, blob_attr *(&aArgs)[1])
+{
+    otError                  error = OT_ERROR_INVALID_ARGS;
+    int                      datasetLength;
+    otOperationalDatasetTlvs dataset;
+
+    VerifyOrExit(aArgs[0] != nullptr);
+    VerifyOrExit((datasetLength = blobmsg_get_hex_string(aArgs[0], dataset.mTlvs, sizeof(dataset.mTlvs))) > 0);
+    dataset.mLength = datasetLength;
+
+    // ScheduleMigration() sends MGMT_PENDING_SET, so the network switches to the
+    // new dataset when its delay timer expires instead of immediately. It
+    // requires an attached device and reports its result asynchronously.
+    mHost.ScheduleMigration(dataset, DeferResponse(aRequest));
+
+    return 0;
+
+exit:
+    SendInvokeResponse(aRequest, &mBuf, error);
+    return 0;
+}
+
 void UbusServer::HandleDeviceRoleChanged(otDeviceRole aRole)
 {
     blob_buf_init(&mBuf, 0);
@@ -1293,6 +1319,7 @@ const ubus_method UbusServer::sMethods[] = {
     OTBR_UBUS_METHOD_NOARG("version", &UbusServer::HandleVersion),
     OTBR_UBUS_METHOD_NOARG("status", &UbusServer::HandleStatus),
     OTBR_UBUS_METHOD("provision", &UbusServer::HandleProvision, kProvisionPolicy),
+    OTBR_UBUS_METHOD("set_pending", &UbusServer::HandleSetPending, kSetPendingPolicy),
 };
 
 ubus_object_type UbusServer::sObjectType = UBUS_OBJECT_TYPE("otbr", sMethods);

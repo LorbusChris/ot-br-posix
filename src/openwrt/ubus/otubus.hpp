@@ -121,6 +121,7 @@ private:
     int HandleVersion(ubus_request_data *aRequest);
     int HandleStatus(ubus_request_data *aRequest);
     int HandleProvision(ubus_request_data *aRequest, blob_attr *(&aArgs)[1]);
+    int HandleSetPending(ubus_request_data *aRequest, blob_attr *(&aArgs)[1]);
 
     // === Callbacks ===
 
