@@ -115,6 +115,8 @@ void UbusServer::Init()
     mHost.GetThreadHelper()->AddDeviceRoleHandler(std::bind(&UbusServer::HandleDeviceRoleChanged, this, _1));
     mHost.GetThreadHelper()->AddActiveDatasetChangeHandler(
         std::bind(&UbusServer::HandleActiveDatasetChanged, this, _1));
+    mHost.GetThreadHelper()->AddPendingDatasetChangeHandler(
+        std::bind(&UbusServer::HandlePendingDatasetChanged, this, _1));
 
 exit:
     return;
@@ -1271,6 +1273,15 @@ void UbusServer::HandleActiveDatasetChanged(const otOperationalDatasetTlvs &aDat
     blob_buf_init(&mBuf, 0);
     blobmsg_add_hex_string(&mBuf, "ActiveDataset", aDataset.mTlvs, aDataset.mLength);
     ubus_notify(&mContext, &Object(), "active_dataset_changed", mBuf.head, -1);
+}
+
+void UbusServer::HandlePendingDatasetChanged(const otOperationalDatasetTlvs &aDataset)
+{
+    // An empty dataset is reported once a scheduled migration has completed,
+    // which is how a subscriber learns that the switch has happened.
+    blob_buf_init(&mBuf, 0);
+    blobmsg_add_hex_string(&mBuf, "PendingDataset", aDataset.mTlvs, aDataset.mLength);
+    ubus_notify(&mContext, &Object(), "pending_dataset_changed", mBuf.head, -1);
 }
 
 const ubus_method UbusServer::sMethods[] = {

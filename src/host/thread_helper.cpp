@@ -149,6 +149,11 @@ void ThreadHelper::StateChangedCallback(otChangedFlags aFlags)
         ActiveDatasetChangedCallback();
     }
 
+    if (aFlags & OT_CHANGED_PENDING_DATASET)
+    {
+        PendingDatasetChangedCallback();
+    }
+
 exit:
     return;
 }
@@ -180,6 +185,33 @@ exit:
     if (error != OT_ERROR_NONE)
     {
         otbrLogWarning("Error handling active dataset change: %s", otThreadErrorToString(error));
+    }
+}
+
+void ThreadHelper::PendingDatasetChangedCallback(void)
+{
+    otError                  error;
+    otOperationalDatasetTlvs datasetTlvs;
+
+    // Unlike the active dataset, this is empty once a scheduled migration has
+    // completed and the pending dataset has been applied.
+    error = otDatasetGetPendingTlvs(mInstance, &datasetTlvs);
+    if (error == OT_ERROR_NOT_FOUND)
+    {
+        datasetTlvs.mLength = 0;
+        error               = OT_ERROR_NONE;
+    }
+    SuccessOrExit(error);
+
+    for (const auto &handler : mPendingDatasetChangeHandlers)
+    {
+        handler(datasetTlvs);
+    }
+
+exit:
+    if (error != OT_ERROR_NONE)
+    {
+        otbrLogWarning("Error handling pending dataset change: %s", otThreadErrorToString(error));
     }
 }
 
@@ -764,6 +796,11 @@ exit:
 void ThreadHelper::AddActiveDatasetChangeHandler(DatasetChangeHandler aHandler)
 {
     mActiveDatasetChangeHandlers.push_back(std::move(aHandler));
+}
+
+void ThreadHelper::AddPendingDatasetChangeHandler(DatasetChangeHandler aHandler)
+{
+    mPendingDatasetChangeHandlers.push_back(std::move(aHandler));
 }
 
 void ThreadHelper::DetachGracefully(ResultHandler aHandler)

@@ -150,6 +150,7 @@ private:
     // ThreadHelper callbacks
     void HandleDeviceRoleChanged(otDeviceRole role);
     void HandleActiveDatasetChanged(const otOperationalDatasetTlvs &dataset);
+    void HandlePendingDatasetChanged(const otOperationalDatasetTlvs &dataset);
 
     // === Internal helpers ===
 

@@ -106,6 +106,13 @@ public:
     void AddActiveDatasetChangeHandler(DatasetChangeHandler aHandler);
 
     /**
+     * This method adds a callback for pending dataset change.
+     *
+     * @param[in]  aHandler   The pending dataset change handler.
+     */
+    void AddPendingDatasetChangeHandler(DatasetChangeHandler aHandler);
+
+    /**
      * This method permits unsecure join on port.
      *
      * @param[in] aPort     The port number.
@@ -273,6 +280,7 @@ private:
     uint8_t RandomChannelFromChannelMask(uint32_t aChannelMask);
 
     void    ActiveDatasetChangedCallback(void);
+    void    PendingDatasetChangedCallback(void);
     bool    AreDatasetTlvsEqualToLocalDatasetTlvs(const otOperationalDatasetTlvs &aDatasetTlvs) const;
     otError StartThreadStack(void);
 
@@ -292,6 +300,7 @@ private:
 
     std::vector<DeviceRoleHandler>    mDeviceRoleHandlers;
     std::vector<DatasetChangeHandler> mActiveDatasetChangeHandlers;
+    std::vector<DatasetChangeHandler> mPendingDatasetChangeHandlers;
 
     std::map<uint16_t, size_t> mUnsecurePortRefCounter;
 
