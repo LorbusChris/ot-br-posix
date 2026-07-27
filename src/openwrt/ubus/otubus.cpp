@@ -1234,6 +1234,15 @@ exit:
     return 0;
 }
 
+int UbusServer::HandleDeprovision(ubus_request_data *aRequest)
+{
+    // Detach gracefully and erase the dataset, returning the device to the
+    // unprovisioned state that provision expects. This is the counterpart of
+    // provision, not of leave, which factory resets the whole instance.
+    mHost.Leave(/* aEraseDataset */ true, DeferResponse(aRequest));
+    return 0;
+}
+
 static constexpr blobmsg_policy kSetPendingPolicy[] = {
     [0] = {.name = "dataset", .type = BLOBMSG_TYPE_STRING},
 };
@@ -1331,6 +1340,7 @@ const ubus_method UbusServer::sMethods[] = {
     OTBR_UBUS_METHOD_NOARG("status", &UbusServer::HandleStatus),
     OTBR_UBUS_METHOD("provision", &UbusServer::HandleProvision, kProvisionPolicy),
     OTBR_UBUS_METHOD("set_pending", &UbusServer::HandleSetPending, kSetPendingPolicy),
+    OTBR_UBUS_METHOD_NOARG("deprovision", &UbusServer::HandleDeprovision),
 };
 
 ubus_object_type UbusServer::sObjectType = UBUS_OBJECT_TYPE("otbr", sMethods);
