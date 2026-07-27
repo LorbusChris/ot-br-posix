@@ -240,25 +240,62 @@ int UbusServer::HandleLeave(ubus_request_data *aRequest)
 
 int UbusServer::HandleThreadStart(ubus_request_data *aRequest)
 {
-    otError error = OT_ERROR_NONE;
+    auto respond = DeferResponse(aRequest);
 
-    SuccessOrExit(error = otIp6SetEnabled(mHost.GetInstance(), true));
-    SuccessOrExit(error = otThreadSetEnabled(mHost.GetInstance(), true));
+    // Going through the host abstraction keeps RcpHost's enabled-state
+    // machine in sync; enabling the stack directly leaves it saying
+    // disabled, which makes ScheduleMigration() refuse to run and Leave()
+    // silently skip its dataset erase. SetThreadEnabled() only starts the
+    // stack when a dataset is already committed, so follow up with the
+    // direct calls to keep this method's contract of actually starting
+    // Thread; both are no-ops when the stack is already up.
+    mHost.SetThreadEnabled(true, [this, respond](otError aError, const std::string &aInfo) {
+        otError error = aError;
 
-exit:
-    SendInvokeResponse(aRequest, &mBuf, error);
+        if (error == OT_ERROR_NOT_IMPLEMENTED)
+        {
+            // NCP does not implement SetThreadEnabled and does not need it.
+            error = OT_ERROR_NONE;
+        }
+
+        if (error == OT_ERROR_NONE)
+        {
+            otOperationalDatasetTlvs dataset;
+
+            // Preserve the old contract: starting without a dataset is an
+            // error. Forcing MLE up without one leaves the stack scanning in
+            // the detached role forever, and blocks provision, which requires
+            // the disabled role.
+            if (otDatasetGetActiveTlvs(mHost.GetInstance(), &dataset) != OT_ERROR_NONE)
+            {
+                error = OT_ERROR_INVALID_STATE;
+            }
+        }
+
+        if (error == OT_ERROR_NONE)
+        {
+            error = otIp6SetEnabled(mHost.GetInstance(), true);
+        }
+
+        if (error == OT_ERROR_NONE)
+        {
+            error = otThreadSetEnabled(mHost.GetInstance(), true);
+        }
+
+        respond(error, aInfo);
+    });
+
     return 0;
 }
 
 int UbusServer::HandleThreadStop(ubus_request_data *aRequest)
 {
-    otError error = OT_ERROR_NONE;
+    // The counterpart of threadstart: SetThreadEnabled(false) detaches
+    // gracefully before disabling the stack, and moves the host state
+    // machine along with it, where the direct calls would leave it saying
+    // enabled.
+    mHost.SetThreadEnabled(false, DeferResponse(aRequest));
 
-    SuccessOrExit(error = otThreadSetEnabled(mHost.GetInstance(), false));
-    SuccessOrExit(error = otIp6SetEnabled(mHost.GetInstance(), false));
-
-exit:
-    SendInvokeResponse(aRequest, &mBuf, error);
     return 0;
 }
 
