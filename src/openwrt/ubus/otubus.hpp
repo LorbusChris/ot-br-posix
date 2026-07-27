@@ -36,7 +36,9 @@
 
 #include "openthread-br/config.h"
 
+#include <functional>
 #include <set>
+#include <string>
 
 #include <libubus.h>
 #include <openthread/commissioner.h>
@@ -155,6 +157,13 @@ private:
 
     // Adds the provided error code to the response and sends it.
     void SendInvokeResponse(ubus_request_data *aRequest, blob_buf *aBuf, otError aError);
+
+    // Defers aRequest and returns a receiver that completes it with the async
+    // result. Host operations such as Join() always report their result through
+    // a callback, so the response cannot be sent from the handler itself.
+    // Matches Host::ThreadHost::AsyncResultReceiver, spelled out so that this
+    // header does not have to pull in the host definitions.
+    std::function<void(otError, const std::string &)> DeferResponse(ubus_request_data *aRequest);
 
     static const ubus_method sMethods[];
     static ubus_object_type  sObjectType;

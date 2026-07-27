@@ -148,6 +148,31 @@ void UbusServer::SendInvokeResponse(ubus_request_data *aRequest, blob_buf *aBuf,
     ubus_send_reply(&mContext, aRequest, aBuf->head);
 }
 
+std::function<void(otError, const std::string &)> UbusServer::DeferResponse(ubus_request_data *aRequest)
+{
+    // The deferred request has to outlive this handler, so it is owned by the
+    // receiver and released once the response has been sent.
+    auto deferred = std::make_shared<ubus_request_data>();
+
+    ubus_defer_request(&mContext, aRequest, deferred.get());
+
+    return [this, deferred](otError aError, const std::string &aInfo) {
+        blob_buf buf{};
+
+        if (aError != OT_ERROR_NONE && !aInfo.empty())
+        {
+            otbrLogWarning("Deferred ubus request failed: %s", aInfo.c_str());
+        }
+
+        blob_buf_init(&buf, 0);
+        // Not mBuf: that buffer belongs to whichever request is being handled
+        // synchronously by the time this callback runs.
+        SendInvokeResponse(deferred.get(), &buf, aError);
+        ubus_complete_deferred_request(&mContext, deferred.get(), 0);
+        blob_buf_free(&buf);
+    };
+}
+
 void UbusServer::HandleActiveScanResultDetail(otActiveScanResult *aResult)
 {
     void *jsonList = nullptr;
@@ -1173,11 +1198,34 @@ int UbusServer::HandleProvision(ubus_request_data *aRequest, blob_attr *(&aArgs)
     VerifyOrExit((datasetLength = blobmsg_get_hex_string(aArgs[0], dataset.mTlvs, sizeof(dataset.mTlvs))) > 0);
     dataset.mLength = datasetLength;
 
-    VerifyOrExit(!otIp6IsEnabled(mHost.GetInstance()), error = OT_ERROR_INVALID_STATE);
+    // Only form a network when there is none, mirroring the Matter cluster,
+    // which rejects SetActiveDatasetRequest once a dataset is configured.
+    // GetDeviceRole() is used rather than Ip6IsEnabled() because the latter is
+    // not implemented under NCP.
+    VerifyOrExit(mHost.GetDeviceRole() == OT_DEVICE_ROLE_DISABLED, error = OT_ERROR_INVALID_STATE);
 
-    SuccessOrExit(error = otDatasetSetActiveTlvs(mHost.GetInstance(), &dataset));
-    SuccessOrExit(error = otIp6SetEnabled(mHost.GetInstance(), true));
-    SuccessOrExit(error = otThreadSetEnabled(mHost.GetInstance(), true));
+    {
+        auto respond = DeferResponse(aRequest);
+
+        // Going straight to otThreadSetEnabled() would start Thread while the
+        // host still considers it disabled, and ScheduleMigration() would then
+        // refuse to run. SetThreadEnabled() is what moves that state, and it is
+        // idempotent.
+        mHost.SetThreadEnabled(true, [this, dataset, respond](otError aError, const std::string &aInfo) {
+            // NCP does not implement SetThreadEnabled and does not need it: its
+            // Join() has no enabled-state precondition.
+            if (aError != OT_ERROR_NONE && aError != OT_ERROR_NOT_IMPLEMENTED)
+            {
+                respond(aError, aInfo);
+            }
+            else
+            {
+                mHost.Join(dataset, respond);
+            }
+        });
+    }
+
+    return 0;
 
 exit:
     SendInvokeResponse(aRequest, &mBuf, error);
