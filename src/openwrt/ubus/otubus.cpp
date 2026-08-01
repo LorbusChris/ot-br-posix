@@ -363,6 +363,8 @@ int UbusServer::HandleNeighbor(ubus_request_data *aRequest)
         blobmsg_add_string(&mBuf, "Mode", mode);
         blobmsg_add_hex_string(&mBuf, "ExtAddress", neighborInfo.mExtAddress.m8, sizeof(neighborInfo.mExtAddress.m8));
         blobmsg_add_u16(&mBuf, "LinkQualityIn", neighborInfo.mLinkQualityIn);
+        blobmsg_add_u32(&mBuf, "LinkFrameCounter", neighborInfo.mLinkFrameCounter);
+        blobmsg_add_u32(&mBuf, "MleFrameCounter", neighborInfo.mMleFrameCounter);
 
         blobmsg_close_table(&mBuf, jsonTable);
 
@@ -725,6 +727,49 @@ int UbusServer::HandleLeaderData(ubus_request_data *aRequest)
     blobmsg_close_table(&mBuf, jsonTable);
 
 exit:
+    SendInvokeResponse(aRequest, &mBuf, error);
+    return 0;
+}
+
+int UbusServer::HandleRouterTable(ubus_request_data *aRequest)
+{
+    otError error       = OT_ERROR_NONE;
+    uint8_t maxRouterId = otThreadGetMaxRouterId(mHost.GetInstance());
+    void   *jsonList    = nullptr;
+    void   *jsonTable   = nullptr;
+
+    jsonList = blobmsg_open_array(&mBuf, "router_list");
+
+    for (uint8_t routerId = 0; routerId <= maxRouterId; routerId++)
+    {
+        otRouterInfo routerInfo;
+
+        if (otThreadGetRouterInfo(mHost.GetInstance(), routerId, &routerInfo) != OT_ERROR_NONE)
+        {
+            continue;
+        }
+
+        jsonTable = blobmsg_open_table(&mBuf, nullptr);
+
+        blobmsg_add_hex_string(&mBuf, "ExtAddress", routerInfo.mExtAddress.m8, sizeof(routerInfo.mExtAddress.m8));
+        // Formatted rather than numeric, to match how neighbor, parent and
+        // rloc16 already report this field. The two tables are meant to be
+        // cross-referenced, and a client joining them on Rloc16 would find
+        // nothing if one side were a number and the other a string.
+        blobmsg_printf(&mBuf, "Rloc16", "0x%04x", routerInfo.mRloc16);
+        blobmsg_add_u16(&mBuf, "RouterId", routerInfo.mRouterId);
+        blobmsg_add_u16(&mBuf, "NextHop", routerInfo.mNextHop);
+        blobmsg_add_u16(&mBuf, "PathCost", routerInfo.mPathCost);
+        blobmsg_add_u16(&mBuf, "LinkQualityIn", routerInfo.mLinkQualityIn);
+        blobmsg_add_u16(&mBuf, "LinkQualityOut", routerInfo.mLinkQualityOut);
+        blobmsg_add_u16(&mBuf, "Age", routerInfo.mAge);
+        blobmsg_add_u8(&mBuf, "Allocated", routerInfo.mAllocated);
+        blobmsg_add_u8(&mBuf, "LinkEstablished", routerInfo.mLinkEstablished);
+
+        blobmsg_close_table(&mBuf, jsonTable);
+    }
+
+    blobmsg_close_array(&mBuf, jsonList);
     SendInvokeResponse(aRequest, &mBuf, error);
     return 0;
 }
@@ -1378,6 +1423,7 @@ const ubus_method UbusServer::sMethods[] = {
     OTBR_UBUS_METHOD_NOARG("interfacename", &UbusServer::HandleInterfaceName),
     OTBR_UBUS_METHOD_NOARG("leaderdata", &UbusServer::HandleLeaderData),
     OTBR_UBUS_METHOD_NOARG("neighbor", &UbusServer::HandleNeighbor),
+    OTBR_UBUS_METHOD_NOARG("routertable", &UbusServer::HandleRouterTable),
     OTBR_UBUS_METHOD_NOARG("networkdata", &UbusServer::HandleNetworkData),
     OTBR_UBUS_METHOD_NOARG("parent", &UbusServer::HandleParent),
     OTBR_UBUS_METHOD_NOARG("partitionid", &UbusServer::HandlePartitionId),

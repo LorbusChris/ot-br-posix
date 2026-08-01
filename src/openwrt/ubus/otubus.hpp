@@ -80,6 +80,7 @@ private:
     int HandleRloc16(ubus_request_data *aRequest);
     int HandleLeaderData(ubus_request_data *aRequest);
     int HandleNeighbor(ubus_request_data *aRequest);
+    int HandleRouterTable(ubus_request_data *aRequest);
     int HandleNetworkData(ubus_request_data *aRequest);
     int HandleParent(ubus_request_data *aRequest);
     int HandlePartitionId(ubus_request_data *aRequest);
